@@ -19,8 +19,6 @@
   <img src="https://img.shields.io/badge/electron-40-47848F?style=flat-square&logo=electron" alt="Electron" />
 </p>
 
----
-
 د\د
 
 ## ✨ Features
