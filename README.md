@@ -21,9 +21,7 @@
 
 ---
 
-<p align="center">
-  <img src="docs/dashboard-preview.png" alt="MealSync Dashboard" width="700" />
-</p>
+د\د
 
 ## ✨ Features
 
