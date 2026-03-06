@@ -1,0 +1,30 @@
+{
+  "appId": "com.mealsync.app",
+  "productName": "MealSync",
+  "directories": {
+    "output": "dist-setup",
+    "buildResources": "build"
+  },
+  "files": [
+    "dist-vite/**/*",
+    "electron/**/*",
+    "package.json"
+  ],
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowToChangeInstallationDirectory": true,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "MealSync"
+  },
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "electron/assets/appMainIcon.ico"
+  }
+}

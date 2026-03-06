@@ -1,18 +1,42 @@
 {
-  "name": "meal-booking",
+  "name": "mealsync",
   "version": "1.0.0",
+  "description": "MealSync - Dorm Meals Auto-Booking Desktop App",
+  "main": "electron/main.js",
   "type": "module",
-  "description": "نظام حجز الوجبات الجامعية",
-  "main": "booking.js",
   "scripts": {
-    "start": "node booking.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
+    "dev:vite": "vite",
+    "dev:electron": "cross-env NODE_ENV=development electron .",
+    "build": "vite build && electron-builder -c electron-builder.json5",
+    "build:win": "vite build && electron-builder --win -c electron-builder.json5",
+    "start": "electron .",
+    "test": "node --experimental-vm-modules tests/encryption.test.js"
   },
-  "keywords": ["meal", "booking", "automation"],
-  "author": "",
+  "keywords": [
+    "meal",
+    "booking",
+    "automation",
+    "electron",
+    "desktop"
+  ],
+  "author": "Yousef Ehab Khalaf",
   "license": "ISC",
   "dependencies": {
-    "inquirer": "^13.1.0",
-    "playwright": "^1.57.0"
+    "electron-store": "^8.1.0",
+    "lucide-react": "^0.563.0",
+    "node-cron": "^3.0.3",
+    "node-machine-id": "^1.1.12",
+    "playwright": "^1.57.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^5.1.3",
+    "concurrently": "^9.2.1",
+    "cross-env": "^10.1.0",
+    "electron": "^40.2.1",
+    "electron-builder": "^26.7.0",
+    "vite": "^7.3.1"
   }
 }
