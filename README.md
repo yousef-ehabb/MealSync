@@ -1,46 +1,115 @@
-# AU Meals Desktop
+<p align="center">
+  <img src="assets/MainAppLogo.png" alt="MealSync Logo" width="120" />
+</p>
 
-A modern, clean, and professional desktop application to automate meal booking for the AU portal.
+<h1 align="center">MealSync</h1>
 
-## Features
+<p align="center">
+  <strong>Automated meal booking for Al-Zahraa Dormitories Management Portal</strong>
+</p>
 
-- **Modern SaaS Dashboard**: Sleek and professional UI with a dark/light mode friendly Indigo/Slate theme.
-- **Auto-Booking**: Schedule your meal bookings automatically at your preferred time.
-- **Secure Credentials**: All credentials are encrypted using AES-256-GCM, tied to your local machine ID.
-- **Live Progress**: Watch the booking process in real-time with a live activity log.
-- **History Logs**: Keep track of all your past booking attempts and results.
-- **English & LTR**: Fully localized to English with a professional left-to-right layout.
+<p align="center">
+  <a href="https://github.com/yousef-ehabb/MealSync/releases/latest">
+    <img src="https://img.shields.io/github/v/release/yousef-ehabb/MealSync?style=flat-square&color=4F46E5" alt="Latest Release" />
+  </a>
+  <a href="https://github.com/yousef-ehabb/MealSync/blob/main/LICENSE">
+    <img src="https://img.shields.io/github/license/yousef-ehabb/MealSync?style=flat-square" alt="License" />
+  </a>
+  <img src="https://img.shields.io/badge/platform-Windows-blue?style=flat-square" alt="Platform" />
+  <img src="https://img.shields.io/badge/electron-40-47848F?style=flat-square&logo=electron" alt="Electron" />
+</p>
 
-## Tech Stack
+---
 
-- **Frontend**: React + Vite + Lucide React
-- **Backend**: Electron (Main Process)
-- **Automation**: Playwright (Chromium)
-- **Styling**: Vanilla CSS (Custom SaaS Design System)
-- **Config**: Electron-Store for persistent settings
+<p align="center">
+  <img src="docs/dashboard-preview.png" alt="MealSync Dashboard" width="700" />
+</p>
 
-## Getting Started
+## ✨ Features
 
-1.  **Installation**:
-    ```bash
-    npm install
-    ```
-2.  **Development**:
-    ```bash
-    npm run dev
-    ```
-3.  **Build**:
-    ```bash
-    npm run build
-    ```
+- **One-Click Booking** — Book all available meals with a single click
+- **Auto-Booking Scheduler** — Set a daily time and MealSync books for you automatically
+- **Meal Report** — View your received vs. missed meals with a clear summary
+- **Booking History** — Full history of all past bookings with status tracking
+- **System Tray** — Runs silently in the background, always ready
+- **Native Notifications** — Get notified when bookings succeed or fail
+- **Encrypted Credentials** — Your password is encrypted using machine-specific keys
+- **Retry Logic** — Automatically retries on network failure (up to 3 attempts)
+- **Start with Windows** — Optionally launch at system startup
 
-## Development
+## 📥 Download & Install
 
-The project structure is organized into:
-- `electron/`: Main process logic (IPC, Scheduler, Tray, Booking logic).
-- `src/`: React frontend (Pages, Components, Styles).
-- `dist-vite/`: Built frontend assets for production.
+> **No coding required.** Just download and run.
 
-## Credits
+1. Go to the [**Latest Release**](https://github.com/yousef-ehabb/MealSync/releases/latest)
+2. Download **`MealSync Setup 1.0.0.exe`**
+3. Run the installer and follow the prompts
+4. Launch MealSync and enter your Student ID & Password
+5. That's it — your meals will be booked automatically!
 
-Developed by **Yousef Ehab Khalaf**.
+## 🛠️ Tech Stack
+
+| Layer | Technology |
+|-------|-----------|
+| **Framework** | Electron 40 |
+| **Frontend** | React 18 + Vanilla CSS |
+| **Build** | Vite 7 + electron-builder |
+| **Automation** | Playwright |
+| **Scheduling** | node-cron |
+| **Security** | AES-256-GCM encryption (machine-bound) |
+
+## 🧑‍💻 Developer Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/yousef-ehabb/MealSync.git
+cd MealSync
+
+# Install dependencies
+npm install
+
+# Install Playwright browsers
+npx playwright install chromium
+
+# Run in development mode
+npm run dev
+
+# Build for Windows
+npm run build:win
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
+
+## 📁 Project Structure
+
+```
+MealSync/
+├── electron/          # Main process (Electron)
+│   ├── main.js        # App entry, IPC handlers
+│   ├── booking.js     # Booking automation (Playwright)
+│   ├── portalReportService.js  # Meal report scraper
+│   ├── scheduler.js   # Cron-based auto-booking
+│   ├── encryption.js  # AES-256-GCM credential encryption
+│   ├── tray.js        # System tray management
+│   └── preload.cjs    # Context bridge (IPC)
+├── src/               # Renderer process (React)
+│   ├── pages/         # Dashboard, History, Settings, Onboarding
+│   ├── styles/        # CSS styles
+│   ├── App.jsx        # Main app component + routing
+│   └── main.jsx       # React entry point
+├── assets/            # App icons and images
+└── tests/             # Unit and E2E tests
+```
+
+## 📄 License
+
+This project is licensed under the [ISC License](LICENSE).
+
+---
+
+<p align="center">
+  <em>Built with ❤️ by <a href="https://github.com/yousef-ehabb">Yousef Ehab</a></em>
+</p>
+<p align="center">
+  <em>Please remember my mother in your prayers.</em>
+</p>
