@@ -1278,6 +1278,31 @@ input:checked+.toggle-slider:before {
   }
 }
 
+/* Retry badge shown in the live tracker during booking retries */
+.spin-icon {
+  animation: spin 1s linear infinite;
+}
+
+.dash-tracker-retry-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  margin-top: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #92400e;
+  background: #fef3c7;
+  border-radius: var(--radius-full, 999px);
+  border: 1px solid #fde68a;
+  width: fit-content;
+}
+
+.retry-count {
+  font-weight: 600;
+  color: var(--color-warning, #f59e0b);
+}
+
 /* Custom Verification Animations */
 .btn:disabled {
   opacity: 0.6;
@@ -1770,10 +1795,7 @@ input:checked+.toggle-slider:before {
   transition: width 0.5s ease;
 }
 
-.dash-progress-steps {
-  display: flex;
-  justify-content: space-between;
-}
+
 
 .dash-step {
   display: flex;
@@ -2217,34 +2239,7 @@ input:checked+.toggle-slider:before {
   background: #F9FAFB;
 }
 
-/* ─── Modal Architecture ─── */
-.modal-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background-color: rgba(15, 23, 42, 0.4);
-  backdrop-filter: blur(2px);
-  z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  animation: fadeIn 0.2s ease-out;
-}
-
-.modal-content {
-  background-color: white;
-  border-radius: 16px;
-  box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-  width: 90%;
-  max-width: 480px;
-  max-height: 85vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-}
+/* ─── Modal Architecture (consolidated — was duplicated at line 2241) ─── */
 
 .modal-header {
   padding: 20px 24px;
@@ -2582,6 +2577,28 @@ input:checked+.toggle-slider:before {
   color: #ef4444;
   font-size: 12px;
   font-weight: 500;
+}
+
+.dash-tracker-cancel-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-top: 8px;
+}
+
+.dash-tracker-cancel-btn:hover {
+  color: #ef4444;
+  border-color: #ef4444;
+  background: rgba(239, 68, 68, 0.06);
 }
 
 /* ─── Meal Icon Neutral ─── */
@@ -3626,6 +3643,8 @@ input:checked+.toggle-slider:before {
   padding: 32px;
   width: 100%;
   max-width: 420px;
+  max-height: 85vh;
+  overflow: hidden;
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
   animation: modalSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -3710,4 +3729,32 @@ input:checked+.toggle-slider:before {
   /* Slightly darker red */
   transform: translateY(-1px);
   box-shadow: 0 4px 6px rgba(239, 68, 68, 0.25);
+}
+
+/* --- Connectivity Real-time Styles --- */
+.settings-status-badge.disconnected,
+.dash-connected-badge.badge-disconnected {
+  background-color: #fee2e2;
+  color: #dc2626;
+}
+
+.offline-banner {
+  background: #FAEEDA;
+  color: #633806;
+  border: 0.5px solid #FAC775;
+  border-radius: var(--radius-md);
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.offline-banner-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #BA7517;
+  flex-shrink: 0;
 }

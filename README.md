@@ -8,6 +8,8 @@
   <strong>Automated meal booking for Al-Zahraa Dormitories Management Portal</strong>
 </p>
 
+> **⚠️ Windows only** — MealSync is built exclusively for Windows. macOS and Linux are not supported.
+
 <p align="center">
   <a href="https://github.com/yousef-ehabb/MealSync/releases/latest">
     <img src="https://img.shields.io/github/v/release/yousef-ehabb/MealSync?style=flat-square&color=4F46E5" alt="Latest Release" />
@@ -19,6 +21,7 @@
   <img src="https://img.shields.io/badge/electron-40-47848F?style=flat-square&logo=electron" alt="Electron" />
 </p>
 
+---
 
 ## ✨ Features
 
@@ -37,10 +40,20 @@
 > **No coding required.** Just download and run.
 
 1. Go to the [**Latest Release**](https://github.com/yousef-ehabb/MealSync/releases/latest)
-2. Download **`MealSync Setup 1.0.0.exe`**
+2. Download **`MealSync Setup 1.1.0.exe`**
 3. Run the installer and follow the prompts
 4. Launch MealSync and enter your Student ID & Password
 5. That's it — your meals will be booked automatically!
+
+## ⚙️ Configuration
+
+### Timezone
+
+> **Important:** MealSync is hardcoded to the `Africa/Cairo` timezone (UTC+2, no DST). All scheduling times are in Cairo local time. If you are not in Egypt, your scheduled booking time will be offset by your timezone difference.
+
+### Debug Mode
+
+When enabled, the Playwright automation browser runs in a visible window instead of headless. Useful for diagnosing portal login issues. Disable for normal use.
 
 ## 🛠️ Tech Stack
 
@@ -75,6 +88,17 @@ npm run build:win
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed contribution guidelines.
 
+## 🏗️ Building for Production
+
+Before building, ensure Playwright's Chromium is installed and the bundle is generated:
+
+```bash
+npx playwright install chromium
+npm run build:win
+```
+
+The `prebuild` script automatically copies Chromium (~150MB) into `chromium-bundle/` which is then bundled into the installer. The installer will be generated in `dist-setup/`.
+
 ## 📁 Project Structure
 
 ```
@@ -93,7 +117,7 @@ MealSync/
 │   ├── App.jsx        # Main app component + routing
 │   └── main.jsx       # React entry point
 ├── assets/            # App icons and images
-└── tests/             # Unit and E2E tests
+└── tests/              # Unit and E2E tests
 ```
 
 ## 📄 License

@@ -10,15 +10,19 @@ function App() {
     const [toast, setToast] = useState(null);
     const [bookingProgress, setBookingProgress] = useState(null);
     const [studentName, setStudentName] = useState(null);
+    const [isOnline, setIsOnline] = useState(true);
 
     // Lifted Meal Report State
     const [mealReport, setMealReport] = useState(null);
     const [mealReportLoading, setMealReportLoading] = useState(false);
     const [mealReportError, setMealReportError] = useState(null);
-    // Initialize from local storage if available so results persist across navigation
     const [bookingResult, setBookingResult] = useState(() => {
-        const stored = localStorage.getItem('lastBookingResult');
-        return stored ? JSON.parse(stored) : null;
+        try {
+            const stored = localStorage.getItem('lastBookingResult');
+            return stored ? JSON.parse(stored) : null;
+        } catch {
+            return null;
+        }
     });
     const initializedRef = useRef(false);
     useEffect(() => {
@@ -26,6 +30,22 @@ function App() {
             initializedRef.current = true;
             checkUserStatus();
         }
+
+        // De-register any stale listeners first — critical for Dev HMR where this
+        // effect runs repeatedly without App ever fully unmounting. Without this,
+        // each hot-reload adds ANOTHER set of handlers on top of the existing ones.
+        window.electronAPI.removeAllListeners('booking:progress');
+        window.electronAPI.removeAllListeners('booking:done');
+        window.electronAPI.removeAllListeners('booking:error');
+        window.electronAPI.removeAllListeners('trigger-book-now');
+        window.electronAPI.removeAllListeners('history:updated');
+        window.electronAPI.removeAllListeners('connectivity:changed');
+        window.electronAPI.removeAllListeners('catchup:starting');
+
+        // Sync initial connectivity status
+        window.electronAPI.getConnectivityStatus().then((status) => {
+            setIsOnline(status === 'online');
+        });
 
         // Progress streaming listeners
         window.electronAPI.onBookingProgress((data) => {
@@ -56,13 +76,37 @@ function App() {
             handleBookNow();
         });
 
+        // P1-1: Real-time history updates from scheduled bookings
+        window.electronAPI.onHistoryUpdated((updatedHistory) => {
+            // This allows History page to reflect scheduled booking results immediately
+            window.__latestHistory = updatedHistory;
+            window.dispatchEvent(new CustomEvent('history-updated', { detail: updatedHistory }));
+        });
+
+        // Connectivity updates
+        window.electronAPI.onConnectivityChanged((status) => {
+            setIsOnline(status === 'online');
+        });
+
+        // Catch-up notification
+        window.electronAPI.onCatchUpStarting(({ reason }) => {
+            const reasonText = reason === 'app-start' 
+                ? 'Missed booking detected — booking now'
+                : 'Connection restored — booking now';
+            showToast(reasonText, 'info');
+        });
+
         return () => {
             window.electronAPI.removeAllListeners('booking:progress');
             window.electronAPI.removeAllListeners('booking:done');
             window.electronAPI.removeAllListeners('booking:error');
             window.electronAPI.removeAllListeners('trigger-book-now');
+            window.electronAPI.removeAllListeners('history:updated');
+            window.electronAPI.removeAllListeners('connectivity:changed');
+            window.electronAPI.removeAllListeners('catchup:starting');
         };
     }, []);
+
 
     // fetchMealReport is intentionally NOT called on bare mount.
     // It is triggered after credentials are confirmed (see checkUserStatus & handleRegistrationComplete).
@@ -208,6 +252,7 @@ function App() {
                         mealReportError={mealReportError}
                         fetchMealReport={fetchMealReport}
                         studentName={studentName}
+                        isOnline={isOnline}
                     />
                 </div>
             )}
@@ -230,6 +275,7 @@ function App() {
                         onReset={handleResetCredentials}
                         showToast={showToast}
                         studentName={studentName}
+                        isOnline={isOnline}
                     />
                 </div>
             )}

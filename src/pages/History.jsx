@@ -1,10 +1,11 @@
 import { useState, useEffect, useMemo } from 'react';
 import {
-    LayoutDashboard, Settings as SettingsIcon, Cpu, Clock, CheckCircle,
-    XCircle, Trash2, History as HistoryIcon, User, ChevronDown,
-    Calendar, Filter, Zap, AlertCircle, ChevronRight
+    Cpu, Clock, CheckCircle,
+    XCircle, Trash2, ChevronDown,
+    Calendar, Filter, Zap, AlertCircle, ChevronRight,
+    History as HistoryIcon
 } from 'lucide-react';
-import appLogo from '../../assets/icons/MainAppLogo.png';
+import Sidebar from '../components/Sidebar';
 
 function History({ onNavigate, showToast, studentName }) {
     const [history, setHistory] = useState([]);
@@ -16,6 +17,13 @@ function History({ onNavigate, showToast, studentName }) {
 
     useEffect(() => {
         loadHistory();
+
+        // P1-1: Listen for real-time history updates from scheduled bookings
+        const handleHistoryUpdate = (e) => {
+            setHistory(e.detail);
+        };
+        window.addEventListener('history-updated', handleHistoryUpdate);
+        return () => window.removeEventListener('history-updated', handleHistoryUpdate);
     }, []);
 
     async function loadHistory() {
@@ -174,35 +182,7 @@ function History({ onNavigate, showToast, studentName }) {
     return (
         <div className="dash-layout">
             {/* ─── Sidebar ─── */}
-            <aside className="dash-sidebar">
-                <div className="dash-sidebar-top" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center' }}>
-                    <img src={appLogo} alt="MealSync" style={{ height: '32px', width: 'auto' }} />
-                    <nav className="dash-nav">
-                        <button className="dash-nav-item" onClick={() => onNavigate('dashboard')}>
-                            <LayoutDashboard size={18} /> Dashboard
-                        </button>
-                        <button className="dash-nav-item active" onClick={() => onNavigate('history')}>
-                            <HistoryIcon size={18} /> History
-                        </button>
-                        <button className="dash-nav-item" onClick={() => onNavigate('settings')}>
-                            <SettingsIcon size={18} /> Settings
-                        </button>
-                    </nav>
-                </div>
-                <div className="dash-sidebar-bottom">
-                    <div className="dash-user">
-                        <div className="dash-user-avatar"><User size={16} /></div>
-                        <div className="dash-user-info">
-                            <span className="dash-user-name">
-                                {studentName && studentName !== 'Student User'
-                                    ? `Hi, ${studentName.split(' ').filter(p => p.trim()).slice(0, 2).join(' ')}`
-                                    : 'Student User'}
-                            </span>
-                            <button className="dash-logout" onClick={() => onNavigate('settings')}>Log out</button>
-                        </div>
-                    </div>
-                </div>
-            </aside>
+            <Sidebar activePage="history" onNavigate={onNavigate} studentName={studentName} />
 
             {/* ─── Main ─── */}
             <div className="dash-main">
@@ -313,11 +293,11 @@ function History({ onNavigate, showToast, studentName }) {
                                             const hasDetails = entry.newlyBookedDates?.length > 0 ||
                                                 entry.alreadyBookedDates?.length > 0 ||
                                                 entry.failedDates?.length > 0;
-                                            const isExpanded = expandedId === (entry.id || idx + dateKey);
+                                            const isExpanded = expandedId === entry.id;
 
                                             return (
-                                                <div key={entry.id || idx} className="hist-entry">
-                                                    <div className="hist-entry-main" onClick={() => hasDetails && setExpandedId(isExpanded ? null : (entry.id || idx + dateKey))}>
+                                                <div key={entry.id} className="hist-entry">
+                                                    <div className="hist-entry-main" onClick={() => hasDetails && setExpandedId(isExpanded ? null : entry.id)}>
                                                         <div className={`hist-entry-icon ${info.badgeClass}`}>
                                                             <Icon size={16} />
                                                         </div>

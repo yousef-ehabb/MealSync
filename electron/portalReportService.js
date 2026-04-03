@@ -1,6 +1,11 @@
-import { chromium } from 'playwright';
+import { chromium } from 'playwright-core';
+import { getChromiumPath } from './chromiumPath.js';
+import fs from 'fs';
+import log from 'electron-log';
+import { PORTAL } from './portalConstants.js';
+import { loginToPortal } from './loginHelper.js';
 
-const LOGIN_URL = 'https://al-zahraa.mans.edu.eg/studentLogin';
+const SESSION_TTL_MS = 15 * 60 * 1000; // 15 minutes
 
 const activeReportBrowsers = new Set();
 
@@ -9,58 +14,110 @@ export async function abortActiveReportBrowsers() {
         try {
             await browser.close();
         } catch (e) {
-            console.error('[MealReport] Error closing browser during abort:', e);
+            log.error('[MealReport] Error closing browser during abort:', e);
         }
     }
     activeReportBrowsers.clear();
 }
 
 /**
+ * Load and validate a saved session file. Returns the parsed state or null if
+ * the file is missing, unreadable, or older than SESSION_TTL_MS.
+ */
+function loadSessionState(sessionPath) {
+    if (!sessionPath) return null;
+    try {
+        const raw = fs.readFileSync(sessionPath, 'utf-8');
+        const state = JSON.parse(raw);
+        const age = Date.now() - (state.savedAt || 0);
+        if (age > SESSION_TTL_MS) {
+            log.info(`[MealReport] Session expired: age=${age}ms > TTL=${SESSION_TTL_MS}ms. Will do full login.`);
+            return null;
+        }
+        return state;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Delete the session file so the next run starts with a clean login.
+ */
+function invalidateSession(sessionPath) {
+    if (!sessionPath) return;
+    try {
+        fs.unlinkSync(sessionPath);
+    } catch {
+        // File may not exist; ignore
+    }
+}
+
+/**
  * Scrape the meal report from the university portal.
- * Reuses the same login flow as bookingService.
+ * If a valid session.json exists (written by booking.js after a successful
+ * booking), the login step is skipped and we jump straight to the report page.
+ *
  * @param {string} studentId
  * @param {string} password
- * @returns {Promise<{ period: string, meals: Array, summary: { total: number, received: number, missed: number } }>}
+ * @param {{ sessionPath?: string }} [options]
+ * @returns {Promise<{ period: string, meals: Array, summary: object }>}
  */
-export async function getMealReport(studentId, password) {
-    const browser = await chromium.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+export async function getMealReport(studentId, password, options = {}) {
+    const { sessionPath = null } = options;
 
-    activeReportBrowsers.add(browser);
+    const sessionState = loadSessionState(sessionPath);
+    const usingSession = !!sessionState;
 
-    const page = await browser.newPage();
+    if (usingSession) {
+        log.info('[MealReport] Reusing saved session — skipping login.');
+    }
+
+    let browser;
+    try {
+        browser = await chromium.launch({
+            executablePath: getChromiumPath(),
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-gpu',
+                '--disable-extensions',
+                '--disable-background-timer-throttling',
+                '--disable-renderer-backgrounding',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-dev-shm-usage',
+            ],
+        });
+        activeReportBrowsers.add(browser);
+    } catch (launchError) {
+        log.error('[MealReport] Browser launch failed:', launchError.message);
+        throw launchError;
+    }
+
+    // Create the context: use cached cookies if available, otherwise fresh
+    const context = usingSession
+        ? await browser.newContext({ storageState: sessionState })
+        : await browser.newContext();
+
+    const page = await context.newPage();
 
     try {
-        // Step 1: Login (same flow as booking.js)
-        await page.goto(LOGIN_URL, { waitUntil: 'networkidle', timeout: 20000 });
+        if (usingSession) {
+            // Navigate directly to the home page — session should keep us logged in
+            await page.goto(PORTAL.HOME_URL, {
+                waitUntil: 'networkidle',
+                timeout: 20000,
+            });
 
-        const idInput = page.locator('input[name="txtStudentID"]');
-        await idInput.clear();
-        await idInput.fill(studentId, { delay: 10 });
-
-        const passInput = page.locator('input[name="txtStudentPassword"]');
-        await passInput.clear();
-        await passInput.fill(password, { delay: 10 });
-
-        await page.getByRole('button', { name: 'دخول' }).click();
-
-        // Wait for the page to redirect away from login (or show error on same page)
-        const loginOutcome = await Promise.race([
-            page.waitForURL('**/studentHome**', { timeout: 25000 })
-                .then(() => 'redirected')
-                .catch(() => 'timeout'),
-            page.locator('text=بيانات غير صحيحة').first()
-                .waitFor({ state: 'visible', timeout: 25000 })
-                .then(() => 'invalid_credentials')
-                .catch(() => 'timeout'),
-        ]);
-
-        if (loginOutcome === 'invalid_credentials') {
-            const err = new Error('Invalid Student ID or password');
-            err.isExplicitRejection = true;
-            throw err;
+            // Verify we are actually logged in (not bounced back to login page)
+            if (page.url().includes('studentLogin')) {
+                log.warn('[MealReport] Session invalid — falling back to full login.');
+                invalidateSession(sessionPath);
+                await loginToPortal(page, studentId, password);
+            }
+        } else {
+            // Step 1: Full login
+            await loginToPortal(page, studentId, password);
         }
 
         // Wait for page to be fully loaded after redirect
@@ -71,21 +128,17 @@ export async function getMealReport(studentId, password) {
         }
 
         // Step 2: Navigate to meal report
-        // The portal uses a sidebar/hamburger menu. Content loads via AJAX
-        // on the same /studentHome URL — there is NO separate route.
-
         const mealsMenuLocator = page.locator([
-            "//span[contains(text(),'الوجبـــــات')]",
-            "//span[contains(text(),'الوجبات')]",
-            "//a[contains(text(),'الوجبات')]",
-            "//li[contains(.,'الوجبات')]//a",
+            `//span[contains(text(),'${PORTAL.TEXT.MEALS_NAV}')]`,
+            `//span[contains(text(),'${PORTAL.TEXT.MEALS_NAV_SHORT}')]`,
+            `//a[contains(text(),'${PORTAL.TEXT.MEALS_NAV_SHORT}')]`,
+            `//li[contains(.,'${PORTAL.TEXT.MEALS_NAV_SHORT}')]//a`,
         ].join(' | '));
 
         try {
             await mealsMenuLocator.first().waitFor({ state: 'visible', timeout: 15000 });
             await mealsMenuLocator.first().click();
         } catch (e) {
-            // If meals menu not visible, try opening the hamburger menu first
             const hamburger = page.locator('.navbar-toggler, button.navbar-toggle, .hamburger, [data-toggle="offcanvas"]').first();
             try {
                 await hamburger.click({ timeout: 5000 });
@@ -96,13 +149,11 @@ export async function getMealReport(studentId, password) {
             }
         }
 
-        // Wait for submenu to expand after clicking the meals menu item
         await page.waitForTimeout(2000); // Allow submenu animation
 
-        // Use multiple strategies to find the meal report link
         const reportLink = page.locator([
-            "//a[contains(.,'تقرير الوجبات')]",
-            "//a[contains(.,'تقرير')]",
+            `//a[contains(.,'${PORTAL.TEXT.MEAL_REPORT_LINK}')]`,
+            `//a[contains(.,'${PORTAL.TEXT.REPORT_KEYWORD}')]`,
             "a[href*='report'], a[href*='Report']",
         ].join(' | '));
 
@@ -110,45 +161,30 @@ export async function getMealReport(studentId, password) {
             await reportLink.first().waitFor({ state: 'visible', timeout: 10000 });
             await reportLink.first().click();
         } catch (e) {
-            // Final fallback: use JavaScript to find and click the link
-            const clicked = await page.evaluate(() => {
+            const clicked = await page.evaluate((keyword) => {
                 const links = [...document.querySelectorAll('a')];
                 const target = links.find(a =>
-                    a.textContent.includes('تقرير') && a.offsetParent !== null
+                    a.textContent.includes(keyword) && a.offsetParent !== null
                 );
-                if (target) {
-                    target.click();
-                    return target.textContent.trim();
-                }
+                if (target) { target.click(); return target.textContent.trim(); }
                 return null;
-            });
-            if (!clicked) {
-                throw new Error('Could not find meal report link in submenu');
-            }
+            }, PORTAL.TEXT.REPORT_KEYWORD);
+            if (!clicked) throw new Error('Could not find meal report link in submenu');
         }
 
-        // Content loads via AJAX on the same page — wait for network + table
         await page.waitForLoadState('networkidle', { timeout: 30000 }).catch(() => { });
-
         await page.waitForSelector('table.table-bordered', { timeout: 30000 });
 
-        // Step 3: Scrape the period subtitle (Robust Regex Search)
+        // Step 3: Scrape period
         const period = await page.evaluate(() => {
-            // Check headers or sub-titles for explicit matches
             const textToSearch = document.body.innerText;
-            // Lookup typical date ranges: "1/3/2026 - 8/3/2026" or "1/3/2026 إلى 8/3/2026"
             const match = textToSearch.match(/(\d{1,2}\/\d{1,2}\/\d{4})[\s\-إلى]+(\d{1,2}\/\d{1,2}\/\d{4})/);
-            if (match) {
-                return `${match[1]} – ${match[2]}`;
-            }
-            // Fallback strategy if regex fails but a structure exists
-            const subtitleEl = document.querySelector('.sub-title') || document.querySelector('h4') || document.querySelector('.panel-title');
-            if (subtitleEl) return subtitleEl.textContent.trim();
-
-            return 'Current Period';
+            if (match) return `${match[1]} – ${match[2]}`;
+            const el = document.querySelector('.sub-title') || document.querySelector('h4') || document.querySelector('.panel-title');
+            return el ? el.textContent.trim() : 'Current Period';
         });
 
-        // Step 4: Scrape the meal table
+        // Step 4: Scrape meal table
         const meals = await page.$$eval('table.table-bordered tbody tr', (rows) =>
             rows.map((row) => ({
                 date: row.cells[0]?.textContent.trim() ?? '',
@@ -157,17 +193,20 @@ export async function getMealReport(studentId, password) {
             }))
         );
 
-        // Step 5: Compute summary
         const total = meals.length;
         const received = meals.filter((m) => m.received).length;
         const missed = total - received;
 
         return { period, meals, summary: { total, received, missed } };
     } catch (error) {
-        console.error('[MealReport] Error:', error.message);
+        // If we tried to use a session and it caused an error, invalidate it
+        if (usingSession) invalidateSession(sessionPath);
+        log.error('[MealReport] Error:', error.message);
         throw error;
     } finally {
-        activeReportBrowsers.delete(browser);
-        await browser.close();
+        if (browser) {
+            activeReportBrowsers.delete(browser);
+            await browser.close().catch(() => {});
+        }
     }
 }

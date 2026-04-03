@@ -1,20 +1,31 @@
-import { chromium } from 'playwright';
+// Changes: P1-6 (domcontentloaded + delay 30), P1-7 (electron-log),
+// Fix A (batch checkbox reads), Fix B (dry-run), Fix C (webhook)
+import { chromium } from 'playwright-core';
+import { getChromiumPath } from './chromiumPath.js';
+import fs from 'fs';
+import { join } from 'path';
+import log from 'electron-log';
+import { PORTAL } from './portalConstants.js';
+import { loginToPortal } from './loginHelper.js';
 
-const LOGIN_URL = 'https://al-zahraa.mans.edu.eg/studentLogin';
 const MAX_ATTEMPTS = 3;
 const RETRY_DELAY_MS = 30000;
 
 const activeBrowsers = new Set();
+let cancellationVersion = 0;
 
 export async function abortActiveBrowsers() {
-    for (const browser of activeBrowsers) {
+    cancellationVersion += 1;
+    const browsers = [...activeBrowsers];
+    activeBrowsers.clear();
+
+    for (const browser of browsers) {
         try {
             await browser.close();
         } catch (e) {
-            console.error('[Booking] Error closing browser during abort:', e);
+            log.error('[Booking] Error closing browser during abort:', e);
         }
     }
-    activeBrowsers.clear();
 }
 
 /**
@@ -24,22 +35,47 @@ export async function abortActiveBrowsers() {
  * @param {object} options
  * @param {boolean} options.headless - run browser headless (default true)
  * @param {function} options.onProgress - callback({ step, message })
+ * @param {boolean} options.dryRun - report what would be booked without saving (Fix B)
+ * @param {string} options.webhookUrl - optional URL to POST results to (Fix C)
  * @returns {Promise<object>} - { success, message, bookedCount, alreadyBookedCount }
  */
 export async function runBooking(studentId, password, options = {}) {
-    const { headless = true, onProgress = () => { } } = options;
+    const { headless = true, onProgress = () => { }, sessionPath = null, dryRun = false, webhookUrl = null } = options;
     let lastError = null;
+    const startingCancellationVersion = cancellationVersion;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         try {
+            if (startingCancellationVersion !== cancellationVersion) {
+                const cancelError = new Error('BOOKING_CANCELLED');
+                cancelError.isExplicitRejection = true;
+                throw cancelError;
+            }
+
             if (attempt > 1) {
                 onProgress({
                     step: 'retrying',
+                    attempt,
+                    maxAttempts: MAX_ATTEMPTS,
                     message: `Attempt ${attempt} of ${MAX_ATTEMPTS}...`,
                 });
             }
 
-            const result = await executeBooking(studentId, password, headless, onProgress);
+            const result = await executeBooking(
+                studentId,
+                password,
+                headless,
+                onProgress,
+                sessionPath,
+                dryRun,
+                startingCancellationVersion
+            );
+
+            // Fix C: Send webhook notification on success
+            if (webhookUrl) {
+                await sendWebhook(webhookUrl, 'booking_complete', result);
+            }
+
             return result;
         } catch (error) {
             lastError = error;
@@ -52,6 +88,8 @@ export async function runBooking(studentId, password, options = {}) {
             if (attempt < MAX_ATTEMPTS) {
                 onProgress({
                     step: 'retrying',
+                    attempt,
+                    maxAttempts: MAX_ATTEMPTS,
                     message: `Network unstable, retrying in 30 seconds... (Attempt ${attempt}/${MAX_ATTEMPTS})`,
                 });
                 await delay(RETRY_DELAY_MS);
@@ -59,58 +97,67 @@ export async function runBooking(studentId, password, options = {}) {
         }
     }
 
+    // Fix C: Send webhook notification on final failure
+    if (webhookUrl && lastError) {
+        await sendWebhook(webhookUrl, 'booking_failed', { message: lastError.message });
+    }
+
     throw lastError || new Error('Meal booking failed - Network timeout or system unreachable after 3 attempts');
 }
 
 export async function validateCredentials(studentId, password) {
-    const browser = await chromium.launch({
-        headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+    let browser;
+    try {
+        browser = await chromium.launch({
+            executablePath: getChromiumPath(),
+            headless: true,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-gpu',
+                '--disable-extensions',
+                '--disable-background-timer-throttling',
+                '--disable-renderer-backgrounding',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-dev-shm-usage',
+            ],
+        });
+    } catch (error) {
+        if (
+            error.message.includes("Executable doesn't exist") ||
+            error.message.includes('Failed to launch') ||
+            error.message.includes('chromium')
+        ) {
+            const friendlyError = new Error(
+                'Browser component not found. Please reinstall MealSync.'
+            );
+            friendlyError.isExplicitRejection = true;
+            throw friendlyError;
+        }
+        throw error;
+    }
 
     activeBrowsers.add(browser);
 
     try {
         const page = await browser.newPage();
-        // Wait for networkidle to ensure all scripts are loaded
-        await page.goto(LOGIN_URL, { waitUntil: 'networkidle', timeout: 20000 });
 
-        // Clear and fill with delay to mimic human typing
-        const idInput = page.locator('input[name="txtStudentID"]');
-        await idInput.clear();
-        await idInput.fill(studentId, { delay: 10 });
-
-        const passInput = page.locator('input[name="txtStudentPassword"]');
-        await passInput.clear();
-        await passInput.fill(password, { delay: 10 });
-
-        await page.getByRole('button', { name: 'دخول' }).click();
-
-        // Wait for either successful login OR error message
-        const loginResult = await Promise.race([
-            page.waitForURL('**/studentHome**', { timeout: 15000 }).then(() => 'success'),
-            page.waitForSelector('#spErr:visible', { timeout: 15000 }).then(() => 'error'),
-        ]);
-
-        if (loginResult === 'error') {
-            const errorText = await page.locator('#spErr').textContent();
-            return { success: false, error: `Login failed: ${errorText.trim()}`, type: 'invalid_credentials' };
-        }
+        await loginToPortal(page, studentId, password);
 
         // Scrape student name from the sidebar profile
         let studentName = null;
         try {
-            const nameEl = page.locator('.nav-profile-text .font-weight-bold');
+            const nameEl = page.locator(PORTAL.SELECTORS.NAV_PROFILE_NAME);
             await nameEl.waitFor({ state: 'visible', timeout: 5000 });
             const rawName = await nameEl.textContent();
             studentName = rawName?.replace(/\s+/g, ' ').trim() || null;
         } catch (err) {
-            console.error(`[Booking] Failed to scrape name: ${err.message}`);
+            log.error(`[Booking] Failed to scrape name: ${err.message}`);
             // Name scraping is best-effort, don't fail validation
         }
         return { success: true, studentName };
     } catch (error) {
-        console.error('[Booking] Validation error:', error.message);
+        log.error('[Booking] Validation error:', error.message);
 
         // On timeout, re-check if the error message appeared (credentials might be wrong
         // but the portal was slow to render the error)
@@ -125,58 +172,62 @@ export async function validateCredentials(studentId, password) {
     }
 }
 
-async function executeBooking(studentId, password, headless, onProgress) {
-    const browser = await chromium.launch({
-        headless,
-        args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    });
+async function executeBooking(studentId, password, headless, onProgress, sessionPath = null, dryRun = false, expectedCancellationVersion = cancellationVersion) {
+    let browser;
+    try {
+        browser = await chromium.launch({
+            executablePath: getChromiumPath(),
+            headless,
+            args: [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--disable-gpu',
+                '--disable-extensions',
+                '--disable-background-timer-throttling',
+                '--disable-renderer-backgrounding',
+                '--disable-backgrounding-occluded-windows',
+                '--disable-dev-shm-usage',
+            ],
+        });
+    } catch (error) {
+        if (
+            error.message.includes("Executable doesn't exist") ||
+            error.message.includes('Failed to launch') ||
+            error.message.includes('chromium')
+        ) {
+            const friendlyError = new Error(
+                'Browser component not found. Please reinstall MealSync.'
+            );
+            friendlyError.isExplicitRejection = true;
+            throw friendlyError;
+        }
+        throw error;
+    }
 
     activeBrowsers.add(browser);
+
+    if (!activeBrowsers.has(browser) || expectedCancellationVersion !== cancellationVersion) {
+        await browser.close().catch(() => { });
+        const err = new Error('BOOKING_CANCELLED');
+        err.isExplicitRejection = true;
+        throw err;
+    }
 
     const page = await browser.newPage();
 
     try {
         // Step 1: Login
         onProgress({ step: 'login', message: 'Logging into AU Portal...' });
-        await page.goto(LOGIN_URL, { waitUntil: 'networkidle', timeout: 20000 });
+        await loginToPortal(page, studentId, password, { typeDelay: 100 });
 
-        // Clear and fill with delay to mimic human typing
-        const idInput = page.locator('input[name="txtStudentID"]');
-        await idInput.clear();
-        await idInput.fill(studentId, { delay: 100 });
-
-        const passInput = page.locator('input[name="txtStudentPassword"]');
-        await passInput.clear();
-        await passInput.fill(password, { delay: 100 });
-
-        await page.getByRole('button', { name: 'دخول' }).click();
-
-        // Wait for the page to redirect away from login (or show error on same page)
-        // Use Promise.race: either URL changes (success) or error message appears (failure)
-        const loginOutcome = await Promise.race([
-            page.waitForURL('**/studentHome**', { timeout: 25000 })
-                .then(() => 'redirected')
-                .catch(() => 'timeout'),
-            page.locator('text=بيانات غير صحيحة').first()
-                .waitFor({ state: 'visible', timeout: 25000 })
-                .then(() => 'invalid_credentials')
-                .catch(() => 'timeout'),
-        ]);
-
-        if (loginOutcome === 'invalid_credentials') {
-            const err = new Error('Login failed - Invalid Student ID or Password');
-            err.isExplicitRejection = true;
-            throw err;
-        }
-
-        // If neither redirect nor error — check if we somehow landed on the dashboard
-        if (loginOutcome === 'timeout') {
-            // Double-check: maybe the page redirected but to a slightly different URL
-            const currentUrl = page.url();
-            if (currentUrl.includes('studentLogin')) {
-                throw new Error('Login wait timed out - page did not redirect from login');
+        // ── Session save: persist cookies so portalReportService can reuse them ──
+        if (sessionPath) {
+            try {
+                const state = await page.context().storageState();
+                fs.writeFileSync(sessionPath, JSON.stringify({ ...state, savedAt: Date.now() }), 'utf-8');
+            } catch (e) {
+                log.warn('[Booking] Could not save session state:', e.message);
             }
-            // If we're on a new URL, proceed
         }
 
         // Wait for page to be fully loaded after redirect
@@ -191,10 +242,10 @@ async function executeBooking(studentId, password, headless, onProgress) {
 
         // Look for the meals menu item — try multiple selectors
         const mealsMenuLocator = page.locator([
-            "//span[contains(text(),'الوجبـــــات')]",
-            "//span[contains(text(),'الوجبات')]",
-            "//a[contains(text(),'الوجبات')]",
-            "//li[contains(.,'الوجبات')]//a",
+            `//span[contains(text(),'${PORTAL.TEXT.MEALS_NAV}')]`,
+            `//span[contains(text(),'${PORTAL.TEXT.MEALS_NAV_SHORT}')]`,
+            `//a[contains(text(),'${PORTAL.TEXT.MEALS_NAV_SHORT}')]`,
+            `//li[contains(.,'${PORTAL.TEXT.MEALS_NAV_SHORT}')]//a`,
         ].join(' | '));
 
         try {
@@ -209,7 +260,7 @@ async function executeBooking(studentId, password, headless, onProgress) {
         const getMealsLink = page.locator('a#getMeals span')
             .or(page.locator('a#getMeals'))
             .or(page.locator('a[href*="mealsBooking"]'))
-            .or(page.locator("//a[contains(.,'حجز الوجبات')]"));
+            .or(page.locator(`//a[contains(.,'${PORTAL.TEXT.BOOK_MEALS_LINK}')]`));
 
         try {
             await getMealsLink.first().waitFor({ state: 'visible', timeout: 10000 });
@@ -226,8 +277,8 @@ async function executeBooking(studentId, password, headless, onProgress) {
             // Non-fatal
         }
 
-        const checkboxLocator = page.locator('input[name="chkMeals"]').or(page.locator('input[type="checkbox"]'));
-        const saveButtonLocator = page.getByRole('button', { name: 'حفظ' }).or(page.locator('text=حفظ'));
+        const checkboxLocator = page.locator(PORTAL.SELECTORS.MEAL_CHECKBOX).or(page.locator('input[type="checkbox"]'));
+        const saveButtonLocator = page.getByRole('button', { name: PORTAL.TEXT.SAVE_BUTTON }).or(page.locator(`text=${PORTAL.TEXT.SAVE_BUTTON}`));
 
         try {
             await Promise.race([
@@ -240,7 +291,14 @@ async function executeBooking(studentId, password, headless, onProgress) {
 
         // Step 3: Book meals
         onProgress({ step: 'booking', message: 'Booking available meals...' });
-        const totalCheckboxes = await checkboxLocator.count();
+
+        // Fix A: Batch checkbox reads — single round-trip to read all states
+        const checkboxData = await page.$$eval(
+            `${PORTAL.SELECTORS.MEAL_CHECKBOX}, input[type="checkbox"]`,
+            els => els.map(el => ({ checked: el.checked, value: el.value || '' }))
+        );
+
+        const totalCheckboxes = checkboxData.length;
         let bookedCount = 0;
         let alreadyBookedCount = 0;
         const newlyBookedDates = [];
@@ -248,27 +306,42 @@ async function executeBooking(studentId, password, headless, onProgress) {
         const failedDates = [];
 
         for (let i = 0; i < totalCheckboxes; i++) {
-            try {
-                const checkbox = checkboxLocator.nth(i);
-                await checkbox.waitFor({ state: 'attached', timeout: 5000 });
-                const isChecked = await checkbox.isChecked();
-                const value = await checkbox.getAttribute('value');
-                const date = value?.split('|')[0] || `Meal ${i + 1}`;
+            const { checked, value } = checkboxData[i];
+            const date = value?.split('|')[0] || `Meal ${i + 1}`;
 
-                if (isChecked) {
-                    alreadyBookedCount++;
-                    alreadyBookedDates.push(date);
-                } else {
-                    await checkbox.check({ timeout: 5000 });
+            if (checked) {
+                alreadyBookedCount++;
+                alreadyBookedDates.push(date);
+            } else {
+                // Fix B: In dry-run mode, don't actually check the box
+                if (dryRun) {
                     bookedCount++;
                     newlyBookedDates.push(date);
+                } else {
+                    try {
+                        await checkboxLocator.nth(i).check({ timeout: 5000 });
+                        bookedCount++;
+                        newlyBookedDates.push(date);
+                    } catch (err) {
+                        failedDates.push({ date, reason: err.message });
+                        log.error(`[Booking] Checkbox ${i} error:`, err.message);
+                    }
                 }
-            } catch (err) {
-                const value = await checkboxLocator.nth(i).getAttribute('value').catch(() => null);
-                const date = value?.split('|')[0] || `Meal ${i + 1}`;
-                failedDates.push({ date, reason: err.message });
-                console.error(`[Booking] Checkbox ${i} error:`, err.message);
             }
+        }
+
+        // Fix B: In dry-run mode, return early without saving
+        if (dryRun) {
+            return {
+                success: true,
+                dryRun: true,
+                message: `Dry run complete — would book ${bookedCount} meal(s)`,
+                bookedCount,
+                alreadyBookedCount,
+                wouldBookDates: newlyBookedDates,
+                alreadyBookedDates,
+                totalAvailable: totalCheckboxes,
+            };
         }
 
         // Step 4: Save
@@ -281,7 +354,7 @@ async function executeBooking(studentId, password, headless, onProgress) {
                 await okButton.click({ timeout: 5000 });
                 await okButton.waitFor({ state: 'hidden', timeout: 5000 }).catch(() => { });
             } catch (err) {
-                console.error('[Booking] Save action error:', err.message);
+                log.error('[Booking] Save action error:', err.message);
                 throw new Error('Meals saved but confirmation prompt failed or timed out.');
             }
         }
@@ -309,4 +382,27 @@ async function executeBooking(studentId, password, headless, onProgress) {
 
 function delay(ms) {
     return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Fix C: Webhook notification helper — never includes credentials, never affects booking result
+async function sendWebhook(webhookUrl, event, result) {
+    try {
+        await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                event,
+                timestamp: new Date().toISOString(),
+                result: {
+                    success: result.success,
+                    message: result.message,
+                    bookedCount: result.bookedCount,
+                    alreadyBookedCount: result.alreadyBookedCount,
+                    dryRun: result.dryRun || false,
+                },
+            }),
+        });
+    } catch (err) {
+        log.warn('[Booking] Webhook delivery failed (non-fatal):', err.message);
+    }
 }

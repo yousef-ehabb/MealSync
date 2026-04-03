@@ -14,3 +14,15 @@ build/
 .env.test.local
 .env.production.local
 sessions/
+session.json
+config.json
+*.rar
+*.zip
+
+chromium-bundle/
+.chromium-path
+
+.agent/
+.qodo/
+docs/
+tests/*.png

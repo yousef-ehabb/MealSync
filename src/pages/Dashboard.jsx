@@ -1,13 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import {
-    LayoutDashboard, Settings as SettingsIcon,
-    CheckCircle, XCircle, Clock, Calendar, History as HistoryIcon,
-    User, RefreshCw, Zap, BellOff, Cpu,
+    CheckCircle, XCircle, Clock, Calendar,
+    RefreshCw, Zap, BellOff, Cpu,
     CreditCard, LogIn, Search, BookOpen, Save, AlertCircle,
     Loader, UtensilsCrossed, ArrowRight,
-    Mail
+    Mail, X
 } from 'lucide-react';
-import appLogo from '../../assets/icons/MainAppLogo.png';
+import Sidebar from '../components/Sidebar';
 
 // ─── Smart Meal Status Logic (Cairo Timezone) ───
 function parseMealDate(dateStr) {
@@ -101,11 +100,11 @@ const STEPS = [
 
 function getStepIndex(step) {
     if (!step) return 0;
-    const map = { starting: 1, login: 1, navigating: 2, booking: 3, saving: 4, completed: 5 };
+    const map = { starting: 1, login: 1, navigating: 2, booking: 3, retrying: 3, saving: 4, completed: 5 };
     return map[step] ?? 0;
 }
 
-function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingResult, mealReport, mealReportLoading, mealReportError, fetchMealReport, studentName }) {
+function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingResult, mealReport, mealReportLoading, mealReportError, fetchMealReport, studentName, isOnline }) {
     const [status, setStatus] = useState(null);
     const [settings, setSettings] = useState(null);
     const [history, setHistory] = useState([]);
@@ -121,6 +120,7 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
     const [trackerExiting, setTrackerExiting] = useState(false);
     const trackerExitRef = useRef(null);
     const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+    const lastValidStepIdxRef = useRef(0);
 
     useEffect(() => {
         loadData();
@@ -191,6 +191,7 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
         setIsBooking(true);
         setTrackerFailed(false);
         setTrackerState('starting');
+        lastValidStepIdxRef.current = 0;
         try {
             await onBookNow();
         } finally {
@@ -203,6 +204,17 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
         const newSettings = { ...settings, notifications: !checked };
         await window.electronAPI.saveSettings(newSettings);
         setSettings(newSettings);
+    };
+
+    const handleCancelBooking = async () => {
+        try {
+            const result = await window.electronAPI.cancelBooking();
+            if (result.success) {
+                // booking:error will fire from the aborted browser and update the tracker naturally
+            }
+        } catch (err) {
+            console.error('[Dashboard] Cancel booking error:', err);
+        }
     };
     const formatNextRun = (isoString) => {
         if (!isoString) return '—';
@@ -235,50 +247,30 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
     };
 
     // Derive active step index for the tracker
-    const activeStepIdx = getStepIndex(trackerState);
-    const progressPercent = trackerFailed
-        ? (activeStepIdx / (STEPS.length - 1)) * 100
-        : (activeStepIdx / (STEPS.length - 1)) * 100;
+    const rawStepIdx = getStepIndex(trackerState);
+    if (rawStepIdx > 0) {
+        lastValidStepIdxRef.current = rawStepIdx;
+    }
+    const activeStepIdx = trackerFailed
+        ? lastValidStepIdxRef.current
+        : rawStepIdx;
+    const progressPercent = (activeStepIdx / (STEPS.length - 1)) * 100;
 
 
 
     return (
         <div className="dash-layout">
             {/* ─── Sidebar ─── */}
-            <aside className="dash-sidebar">
-                <div className="dash-sidebar-top" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center' }}>
-                    <img src={appLogo} alt="MealSync" style={{ height: '32px', width: 'auto' }} />
-                    <nav className="dash-nav">
-                        <button className="dash-nav-item active" onClick={() => onNavigate('dashboard')}>
-                            <LayoutDashboard size={18} /> Dashboard
-                        </button>
-                        <button className="dash-nav-item" onClick={() => onNavigate('history')}>
-                            <HistoryIcon size={18} /> History
-                        </button>
-                        <button className="dash-nav-item" onClick={() => onNavigate('settings')}>
-                            <SettingsIcon size={18} /> Settings
-                        </button>
-                    </nav>
-                </div>
-                <div className="dash-sidebar-bottom">
-                    <div className="dash-user">
-                        <div className="dash-user-avatar"><User size={16} /></div>
-                        <div className="dash-user-info">
-                            <span className="dash-user-name">
-                                {studentName && studentName !== 'Student User'
-                                    ? `Hi, ${studentName.split(' ').filter(p => p.trim()).slice(0, 2).join(' ')}`
-                                    : 'Student User'}
-                            </span>
-                            <button className="dash-logout" onClick={() => onNavigate('settings')}>
-                                Log out
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </aside>
+            <Sidebar activePage="dashboard" onNavigate={onNavigate} studentName={studentName} />
 
             {/* ─── Main Area ─── */}
             <div className="dash-main">
+                {!isOnline && (
+                    <div className="offline-banner">
+                        <span className="offline-banner-dot"></span>
+                        You're offline — automatic booking will resume when you reconnect
+                    </div>
+                )}
                 <header className="dash-header">
                     <div>
                         <h1 className="dash-page-title">Dashboard Overview</h1>
@@ -288,8 +280,9 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
                         <button
                             className={`dash-booknow-btn ${bookCompleted ? 'btn-completed' : ''}`}
                             onClick={handleBook}
-                            disabled={isBooking}
-                            title={isBooking ? 'Booking already in progress' : 'Start manual booking'}
+                            disabled={isBooking || !isOnline}
+                            title={isBooking ? 'Booking already in progress' : !isOnline ? 'Offline - cannot book' : 'Start manual booking'}
+                            data-testid="book-now-button"
                         >
                             {bookCompleted ? (
                                 <><CheckCircle size={16} /> Completed</>
@@ -299,7 +292,6 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
                                 <><Zap size={16} /> Book Now</>
                             )}
                         </button>
-
                     </div>
                 </header>
 
@@ -370,6 +362,21 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
                                     })}
                                 </div>
 
+                                {/* Retry Badge */}
+                                {bookingProgress?.step === 'retrying' && (
+                                    <div className="dash-tracker-retry-badge">
+                                        <RefreshCw size={13} className="spin-icon" />
+                                        <span>
+                                            {bookingProgress.message || 'Retrying...'}
+                                            {bookingProgress.attempt && bookingProgress.maxAttempts && (
+                                                <span className="retry-count">
+                                                    &nbsp;({bookingProgress.attempt}/{bookingProgress.maxAttempts})
+                                                </span>
+                                            )}
+                                        </span>
+                                    </div>
+                                )}
+
                                 {/* Status Message */}
                                 {trackerFailed && bookingResult?.message && (
                                     <div className="dash-tracker-error">
@@ -383,6 +390,18 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
                                             })()}
                                         </span>
                                     </div>
+                                )}
+
+                                {/* Show cancel button only while booking is actively running */}
+                                {isBooking && !trackerFailed && trackerState !== 'completed' && (
+                                    <button
+                                        className="dash-tracker-cancel-btn"
+                                        onClick={handleCancelBooking}
+                                        title="Cancel booking"
+                                    >
+                                        <X size={14} />
+                                        <span>Cancel</span>
+                                    </button>
                                 )}
                             </div>
                         )}
@@ -454,7 +473,7 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
                                                 {previewMeals.map((meal, idx) => {
                                                     const status = getMealStatus(meal);
                                                     return (
-                                                        <div key={idx} className="dash-report-row">
+                                                        <div key={`meal-preview-${meal.date}`} className="dash-report-row">
                                                             <span className="dash-report-date">{meal.date === targetDates[1] ? 'Today' : meal.date === targetDates[0] ? 'Yesterday' : 'Tomorrow'} <span style={{ fontSize: '14px', color: '#6b7280', marginLeft: '4px', fontWeight: 'normal' }}>({meal.date})</span></span>
                                                             <span className={`pill-badge pill-${status.label.toLowerCase()}`}>
                                                                 {status.label}
@@ -524,7 +543,7 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
                                         }
 
                                         return (
-                                            <div key={idx} className="dash-activity-row">
+                                            <div key={item.id} className="dash-activity-row">
                                                 <span className={`dash-activity-dot ${dotClass}`} />
                                                 <div className="dash-activity-info">
                                                     <p className="dash-activity-title">
@@ -551,8 +570,8 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
                         <div className="dash-card dash-account-card">
                             <div className="dash-card-header">
                                 <h3 className="dash-card-title">University Account</h3>
-                                <span className={`dash-connected-badge ${status?.studentId ? '' : 'badge-disconnected'}`}>
-                                    {status?.studentId ? 'Connected' : 'Not Set'}
+                                <span className={`dash-connected-badge ${isOnline ? '' : 'badge-disconnected'}`}>
+                                    {isOnline ? 'Connected' : 'Disconnected'}
                                 </span>
                             </div>
                             <div className="dash-account-body">
@@ -649,7 +668,7 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
                                     {mealReport.meals.map((meal, idx) => {
                                         const status = getMealStatus(meal);
                                         return (
-                                            <div key={idx} className="dash-report-row">
+                                            <div key={`meal-full-${meal.date}`} className="dash-report-row">
                                                 <span className="dash-report-date">{meal.date}</span>
                                                 <span className={`pill-badge pill-${status.label.toLowerCase()}`}>
                                                     {status.label}

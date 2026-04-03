@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { _electron as electron } from 'playwright-core';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
@@ -29,7 +29,6 @@ async function runE2ETest() {
         await window.waitForSelector('#root', { timeout: 60000 });
         console.log('⚛️ React app loaded.');
 
-        // Check current view (Dashboard or Onboarding)
         const isDashboard = await window.locator('[data-testid="nav-dashboard"]').count() > 0;
 
         if (isDashboard) {
@@ -45,7 +44,6 @@ async function runE2ETest() {
             }
         }
 
-        // Trigger Booking if on Dashboard
         if (isDashboard) {
             console.log('🖱️ Clicking "Book Now" button...');
             const bookButton = window.locator('[data-testid="book-now-button"]');
@@ -58,9 +56,8 @@ async function runE2ETest() {
             // Wait for completion (Success or Failure)
             await window.waitForFunction(
                 () => {
-                    const statusText = document.querySelector('.progress-status span')?.textContent;
-                    // Updated for English UI completion messages
-                    return statusText?.includes('Successfully') || statusText?.includes('failed') || statusText?.includes('already booked');
+                    const tracker = document.querySelector('.dash-tracker-card');
+                    return tracker && (tracker.classList.contains('tracker-exit') || tracker.classList.contains('bar-success') || tracker.classList.contains('bar-failed'));
                 },
                 {},
                 { timeout: 180000 }

@@ -1,21 +1,17 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import {
-    LayoutDashboard, Settings as SettingsIcon, Cpu, Clock, Bell,
+    Settings as SettingsIcon, Cpu, Clock, Bell,
     Monitor, User, LogOut, Bug, Github,
-    History as HistoryIcon, ShieldCheck, CreditCard, ChevronDown, X
+    ShieldCheck
 } from 'lucide-react';
-import appLogo from '../../assets/icons/MainAppLogo.png';
+import Sidebar from '../components/Sidebar';
+import TimePicker from '../components/TimePicker';
 
-function Settings({ onNavigate, onLogout, onReset, showToast, studentName }) {
+function Settings({ onNavigate, onLogout, onReset, showToast, studentName, isOnline }) {
     const [settings, setSettings] = useState(null);
     const [credentials, setCredentials] = useState(null);
-    const [pickerOpen, setPickerOpen] = useState(false);
-    const [pickerHour, setPickerHour] = useState(8);
-    const [pickerMinute, setPickerMinute] = useState(0);
-    const [pickerPeriod, setPickerPeriod] = useState('AM');
-    const pickerRef = useRef(null);
     const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-    const [logoutAction, setLogoutAction] = useState('logout'); // 'logout' or 'reset'
+    const [logoutAction, setLogoutAction] = useState('logout');
 
     // Auto-save helper
     const autoSave = async (newSettings) => {
@@ -24,51 +20,9 @@ function Settings({ onNavigate, onLogout, onReset, showToast, studentName }) {
         showToast('Settings updated', 'info');
     };
 
-    // Parse 24h "HH:MM" to 12h picker state
-    const openPicker = () => {
-        const time24 = settings.scheduleTime || '08:00';
-        const [hStr, mStr] = time24.split(':');
-        let h = parseInt(hStr, 10);
-        const m = parseInt(mStr, 10);
-        const period = h >= 12 ? 'PM' : 'AM';
-        if (h === 0) h = 12;
-        else if (h > 12) h -= 12;
-        setPickerHour(h);
-        setPickerMinute(m);
-        setPickerPeriod(period);
-        setPickerOpen(true);
-    };
-
-    const confirmPicker = () => {
-        let h24 = pickerHour;
-        if (pickerPeriod === 'AM' && h24 === 12) h24 = 0;
-        else if (pickerPeriod === 'PM' && h24 !== 12) h24 += 12;
-        const timeStr = `${String(h24).padStart(2, '0')}:${String(pickerMinute).padStart(2, '0')}`;
-        autoSave({ ...settings, scheduleTime: timeStr });
-        setPickerOpen(false);
-    };
-
-    const formatDisplay = () => {
-        const time24 = settings?.scheduleTime || '08:00';
-        const [hStr, mStr] = time24.split(':');
-        let h = parseInt(hStr, 10);
-        const period = h >= 12 ? 'PM' : 'AM';
-        if (h === 0) h = 12;
-        else if (h > 12) h -= 12;
-        return `${String(h).padStart(2, '0')}:${mStr} ${period}`;
-    };
 
     useEffect(() => {
         loadSettings();
-        const handleClickOutside = (e) => {
-            if (pickerRef.current && !pickerRef.current.contains(e.target)) {
-                setPickerOpen(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => {
-            document.removeEventListener('mousedown', handleClickOutside);
-        };
     }, []);
 
     async function loadSettings() {
@@ -119,38 +73,8 @@ function Settings({ onNavigate, onLogout, onReset, showToast, studentName }) {
 
     return (
         <div className="dash-layout">
-            {/* ─── Sidebar (identical to Dashboard) ─── */}
-            <aside className="dash-sidebar">
-                <div className="dash-sidebar-top" style={{ padding: '16px 20px', display: 'flex', alignItems: 'center' }}>
-                    <img src={appLogo} alt="MealSync" style={{ height: '32px', width: 'auto' }} />
-                    <nav className="dash-nav">
-                        <button className="dash-nav-item" onClick={() => onNavigate('dashboard')}>
-                            <LayoutDashboard size={18} /> Dashboard
-                        </button>
-                        <button className="dash-nav-item" onClick={() => onNavigate('history')}>
-                            <HistoryIcon size={18} /> History
-                        </button>
-                        <button className="dash-nav-item active" onClick={() => onNavigate('settings')}>
-                            <SettingsIcon size={18} /> Settings
-                        </button>
-                    </nav>
-                </div>
-                <div className="dash-sidebar-bottom">
-                    <div className="dash-user">
-                        <div className="dash-user-avatar"><User size={16} /></div>
-                        <div className="dash-user-info">
-                            <span className="dash-user-name">
-                                {studentName && studentName !== 'Student User'
-                                    ? `Hi, ${studentName.split(' ').filter(p => p.trim()).slice(0, 2).join(' ')}`
-                                    : 'Student User'}
-                            </span>
-                            <button className="dash-logout" onClick={() => onNavigate('settings')}>
-                                Log out
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </aside>
+            {/* ─── Sidebar ─── */}
+            <Sidebar activePage="settings" onNavigate={onNavigate} studentName={studentName} />
 
             {/* ─── Main Area ─── */}
             <div className="dash-main">
@@ -185,7 +109,9 @@ function Settings({ onNavigate, onLogout, onReset, showToast, studentName }) {
                                 </div>
                                 <div className="settings-account-detail-row">
                                     <span className="settings-account-label">Status</span>
-                                    <span className="settings-status-badge">Connected</span>
+                                    <span className={`settings-status-badge ${isOnline ? 'connected' : 'disconnected'}`}>
+                                        {isOnline ? 'Connected' : 'Disconnected'}
+                                    </span>
                                 </div>
                             </div>
 
@@ -237,63 +163,11 @@ function Settings({ onNavigate, onLogout, onReset, showToast, studentName }) {
                                         <span className="settings-row-desc">Local Time (Cairo)</span>
                                     </div>
                                 </div>
-                                <div className="tp-wrapper" ref={pickerRef}>
-                                    <button
-                                        className="tp-trigger"
-                                        onClick={openPicker}
-                                        disabled={!settings.autoBook}
-                                    >
-                                        <Clock size={14} />
-                                        <span>{formatDisplay()}</span>
-                                        <ChevronDown size={14} className={`tp-chevron ${pickerOpen ? 'tp-chevron-open' : ''}`} />
-                                    </button>
-
-                                    {pickerOpen && (
-                                        <div className="tp-popover">
-                                            <div className="tp-popover-header">
-                                                <span className="tp-popover-title">Set Time</span>
-                                                <button className="tp-close" onClick={() => setPickerOpen(false)}>
-                                                    <X size={14} />
-                                                </button>
-                                            </div>
-
-                                            <div className="tp-selectors">
-                                                {/* Hour */}
-                                                <div className="tp-col">
-                                                    <button className="tp-arrow" onClick={() => setPickerHour(h => h >= 12 ? 1 : h + 1)}>▲</button>
-                                                    <span className="tp-value">{String(pickerHour).padStart(2, '0')}</span>
-                                                    <button className="tp-arrow" onClick={() => setPickerHour(h => h <= 1 ? 12 : h - 1)}>▼</button>
-                                                </div>
-
-                                                <span className="tp-separator">:</span>
-
-                                                {/* Minute */}
-                                                <div className="tp-col">
-                                                    <button className="tp-arrow" onClick={() => setPickerMinute(m => m >= 59 ? 0 : m + 1)}>▲</button>
-                                                    <span className="tp-value">{String(pickerMinute).padStart(2, '0')}</span>
-                                                    <button className="tp-arrow" onClick={() => setPickerMinute(m => m <= 0 ? 59 : m - 1)}>▼</button>
-                                                </div>
-
-                                                {/* AM/PM */}
-                                                <div className="tp-period">
-                                                    <button
-                                                        className={`tp-period-btn ${pickerPeriod === 'AM' ? 'active' : ''}`}
-                                                        onClick={() => setPickerPeriod('AM')}
-                                                    >AM</button>
-                                                    <button
-                                                        className={`tp-period-btn ${pickerPeriod === 'PM' ? 'active' : ''}`}
-                                                        onClick={() => setPickerPeriod('PM')}
-                                                    >PM</button>
-                                                </div>
-                                            </div>
-
-                                            <div className="tp-actions">
-                                                <button className="tp-cancel" onClick={() => setPickerOpen(false)}>Cancel</button>
-                                                <button className="tp-confirm" onClick={confirmPicker}>Confirm</button>
-                                            </div>
-                                        </div>
-                                    )}
-                                </div>
+                                <TimePicker
+                                    value={settings.scheduleTime || '08:00'}
+                                    onChange={(time) => autoSave({ ...settings, scheduleTime: time })}
+                                    disabled={!settings.autoBook}
+                                />
                             </div>
                         </div>
                     </div>

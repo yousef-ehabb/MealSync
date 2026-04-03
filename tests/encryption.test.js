@@ -48,8 +48,8 @@ test('empty string round-trip works', () => {
 });
 
 test('credential encrypt/decrypt round-trip', () => {
-    const studentId = '30509028800074';
-    const password = 'testPass123';
+    const studentId = '12345678901234';
+    const password = 'dummy_password_123';
     const encrypted = encryptCredentials(studentId, password);
     const { studentId: sId, password: pw } = decryptCredentials(encrypted);
     assert.strictEqual(sId, studentId);

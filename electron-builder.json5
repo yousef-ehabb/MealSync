@@ -1,6 +1,8 @@
 {
   "appId": "com.mealsync.app",
   "productName": "MealSync",
+  "copyright": "Copyright © 2025 yousef-ehabb",
+  "description": "Automated meal booking for Al-Zahraa University dorm students",
   "directories": {
     "output": "dist-setup",
     "buildResources": "build"
@@ -10,7 +12,15 @@
     "electron/**/*",
     "package.json"
   ],
+  "extraResources": [
+    {
+      "from": "chromium-bundle/",
+      "to": "chromium",
+      "filter": ["**/*"]
+    }
+  ],
   "nsis": {
+    "installerHeaderIcon": "electron/assets/appMainIcon.ico",
     "oneClick": false,
     "perMachine": false,
     "allowToChangeInstallationDirectory": true,

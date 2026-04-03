@@ -1,15 +1,17 @@
 {
   "name": "mealsync",
-  "version": "1.0.0",
-  "description": "MealSync - Dorm Meals Auto-Booking Desktop App",
+  "version": "1.1.0",
+  "description": "Automated meal booking for Al-Zahraa University dorm students",
   "main": "electron/main.js",
   "type": "module",
   "scripts": {
     "dev": "concurrently \"npm run dev:vite\" \"npm run dev:electron\"",
     "dev:vite": "vite",
     "dev:electron": "cross-env NODE_ENV=development electron .",
+    "postinstall": "npx playwright install chromium",
+    "prebuild": "node scripts/getBrowserPath.js",
     "build": "vite build && electron-builder -c electron-builder.json5",
-    "build:win": "vite build && electron-builder --win -c electron-builder.json5",
+    "build:win": "npm run prebuild && vite build && electron-builder --win -c electron-builder.json5",
     "start": "electron .",
     "test": "node --experimental-vm-modules tests/encryption.test.js"
   },
@@ -20,14 +22,17 @@
     "electron",
     "desktop"
   ],
-  "author": "Yousef Ehab Khalaf",
+  "author": "yousef-ehabb",
   "license": "ISC",
+  "private": true,
   "dependencies": {
+    "electron-log": "^5.3.0",
     "electron-store": "^8.1.0",
     "lucide-react": "^0.563.0",
     "node-cron": "^3.0.3",
     "node-machine-id": "^1.1.12",
-    "playwright": "^1.57.0",
+    "playwright-core": "^1.57.0",
+    "fs-extra": "^11.2.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
