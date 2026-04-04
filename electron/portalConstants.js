@@ -27,4 +27,14 @@ export const PORTAL = {
         MEAL_REPORT_LINK: 'تقرير الوجبات',
         REPORT_KEYWORD: 'تقرير',
     },
+
+    // Multiple known error patterns the portal may show on invalid login.
+    // loginHelper.js checks ALL of these to catch credential failures.
+    LOGIN_ERROR_PATTERNS: [
+        'بيانات غير صحيحة',
+        'خطأ فى البيانات',
+        'خطأ في البيانات',
+        'غير صحيح',
+        'Invalid',
+    ],
 };

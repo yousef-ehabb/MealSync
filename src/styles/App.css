@@ -1943,6 +1943,10 @@ input:checked+.toggle-slider:before {
   background: #94a3b8;
 }
 
+.dash-activity-dot.dot-cancelled {
+  background: #888780;
+}
+
 .dash-activity-info {
   display: flex;
   flex-direction: column;

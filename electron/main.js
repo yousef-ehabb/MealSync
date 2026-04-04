@@ -1,3 +1,10 @@
+/**
+ * electron/main.js
+ * 
+ * FIX: Suppress desktop notifications when a booking is manually cancelled by the user.
+ * Added a robust isCancelled guard in the 'book-now' IPC handler catch block.
+ */
+
 // Set timezone BEFORE anything else
 process.env.TZ = 'Africa/Cairo';
 
@@ -8,7 +15,7 @@ import fs from 'fs';
 import { randomUUID } from 'crypto';
 import Store from 'electron-store';
 import { encryptCredentials, decryptCredentialsWithMigration } from './encryption.js';
-import { runBooking, validateCredentials, abortActiveBrowsers } from './booking.js';
+import { runBooking, validateCredentials, abortActiveBrowsers, requestCancellation } from './booking.js';
 import { getMealReport, abortActiveReportBrowsers } from './portalReportService.js';
 import { startScheduler, stopScheduler, getSchedulerStatus, setSchedulerDeps, checkAndRunMissedBooking } from './scheduler.js';
 import { createTray, destroyTray } from './tray.js';
@@ -180,8 +187,8 @@ app.whenReady().then(() => {
     if (!fs.existsSync(chromiumExe)) {
         dialog.showErrorBox(
             'MealSync — Missing Component',
-            'A required browser component (Chromium) was not found.\\n\\n' +
-            'Please reinstall MealSync from the official installer.\\n\\n' +
+            'A required browser component (Chromium) was not found.\n\n' +
+            'Please reinstall MealSync from the official installer.\n\n' +
             'Expected path: ' + chromiumExe
         );
         app.quit();
@@ -483,13 +490,27 @@ ipcMain.handle('get-connectivity-status', () => {
 
 // --- Credentials ---
 ipcMain.handle('save-credentials', async (_event, { studentId, password }) => {
+    log.info('[Login] save-credentials IPC received, starting validation...');
     try {
-        // Validate first
+        // Validate credentials against the real portal BEFORE saving anything
         const validationResult = await validateCredentials(studentId, password);
-        if (!validationResult.success) {
-            return { success: false, error: validationResult.error };
+        log.info('[Login] validateCredentials result:', {
+            success: validationResult.success,
+            type: validationResult.type || 'none',
+            hasName: !!validationResult.studentName,
+            error: validationResult.error || 'none',
+        });
+
+        if (validationResult.success !== true) {
+            log.warn('[Login] Credential validation failed — NOT saving credentials.');
+            return {
+                success: false,
+                error: validationResult.error,
+                type: validationResult.type || 'unknown',
+            };
         }
 
+        // Only save if validation passed
         const encrypted = encryptCredentials(studentId, password, store);
         store.set('credentials', encrypted);
         store.set('studentId', studentId);
@@ -499,9 +520,15 @@ ipcMain.handle('save-credentials', async (_event, { studentId, password }) => {
             store.set('studentName', validationResult.studentName);
         }
 
-        return { success: true };
+        log.info('[Login] Credentials saved successfully, navigating to dashboard.');
+        return { success: true, studentName: validationResult.studentName };
     } catch (error) {
-        return { success: false, error: error.message };
+        log.error('[Login] save-credentials error:', error.message);
+        return {
+            success: false,
+            error: error.message,
+            type: error.isExplicitRejection ? 'invalid_credentials' : 'error',
+        };
     }
 });
 
@@ -705,7 +732,7 @@ ipcMain.handle('book-now', async () => {
         mealReportCachedAt = 0;
 
         const isTimeout = error.message === 'BOOKING_TIMEOUT';
-        const isCancelled = error.message === 'BOOKING_CANCELLED';
+        const isCancelled = error.isCancelled || error.message?.toLowerCase().includes('cancel');
         const userMessage = isTimeout
             ? 'Booking timed out after 3 minutes. The portal may be slow or unreachable.'
             : isCancelled
@@ -729,7 +756,7 @@ ipcMain.handle('book-now', async () => {
             const history = store.get('history', []);
             const idx = history.findIndex(h => h.id === pendingEntry.id);
 
-            const isNetworkFailure = !error.isExplicitRejection && !isCancelled;
+            const isNetworkFailure = !error.isExplicitRejection;
 
             if (idx !== -1) {
                 history[idx] = {
@@ -747,19 +774,23 @@ ipcMain.handle('book-now', async () => {
             }
 
             const currentSettings = store.get('settings', {});
+            // Never notify the user for their own cancellations
             if (!isCancelled && currentSettings.notifications !== false) {
                 new Notification({
                     title: 'MealSync',
-                    body: isNetworkFailure || isTimeout ? 'Booking timed out or network instability' : 'Meal booking failed',
+                    body: isNetworkFailure
+                        ? 'Booking timed out or network instability'
+                        : 'Meal booking failed',
                     icon: join(__dirname, '../assets/appMainIcon.ico'),
                 }).show();
             }
         }
 
-        // ALWAYS notify renderer of error so UI resets
-        if (!isCancelled && mainWindow && !mainWindow.isDestroyed()) {
+        // ALWAYS notify renderer of error so UI resets (including cancellations)
+        if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.webContents.send('booking:error', {
                 message: userMessage,
+                isCancelled,
             });
         }
 
@@ -775,7 +806,8 @@ ipcMain.handle('cancel-booking', async () => {
         return { success: false, error: 'No booking is currently in progress.' };
     }
     try {
-        log.info('[Booking] User requested cancellation — aborting active browsers.');
+        log.info('[Cancel] User requested cancellation');
+        requestCancellation();
         await abortActiveBrowsers();
         await abortActiveReportBrowsers();
         isBookingInProgress = false;

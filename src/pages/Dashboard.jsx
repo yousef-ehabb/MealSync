@@ -120,6 +120,7 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
     const [trackerExiting, setTrackerExiting] = useState(false);
     const trackerExitRef = useRef(null);
     const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+    const [cancelling, setCancelling] = useState(false);
     const lastValidStepIdxRef = useRef(0);
 
     useEffect(() => {
@@ -130,6 +131,25 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
 
     useEffect(() => {
         if (bookingProgress) {
+            // Cancelled step: show briefly then auto-dismiss
+            if (bookingProgress.step === 'cancelled') {
+                setCancelling(false);
+                setIsBooking(false);
+                setTrackerFailed(true);
+                setTrackerState('cancelled');
+                // Auto-dismiss after 2 seconds
+                const cancelTimer = setTimeout(() => {
+                    setTrackerExiting(true);
+                    trackerExitRef.current = setTimeout(() => {
+                        setShowTracker(false);
+                        setTrackerExiting(false);
+                        setTrackerFailed(false);
+                        setTrackerState('idle');
+                    }, 280);
+                }, 2000);
+                return () => clearTimeout(cancelTimer);
+            }
+
             setIsBooking(true);
             setTrackerFailed(false);
             setTrackerState(bookingProgress.step || 'starting');
@@ -141,6 +161,7 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
 
     useEffect(() => {
         if (!bookingResult) return;
+        setCancelling(false);
 
         setHasBookedThisSession(true);
 
@@ -208,12 +229,16 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
 
     const handleCancelBooking = async () => {
         try {
+            setCancelling(true);
             const result = await window.electronAPI.cancelBooking();
             if (result.success) {
                 // booking:error will fire from the aborted browser and update the tracker naturally
+            } else {
+                setCancelling(false);
             }
         } catch (err) {
             console.error('[Dashboard] Cancel booking error:', err);
+            setCancelling(false);
         }
     };
     const formatNextRun = (isoString) => {
@@ -368,11 +393,6 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
                                         <RefreshCw size={13} className="spin-icon" />
                                         <span>
                                             {bookingProgress.message || 'Retrying...'}
-                                            {bookingProgress.attempt && bookingProgress.maxAttempts && (
-                                                <span className="retry-count">
-                                                    &nbsp;({bookingProgress.attempt}/{bookingProgress.maxAttempts})
-                                                </span>
-                                            )}
                                         </span>
                                     </div>
                                 )}
@@ -398,9 +418,10 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
                                         className="dash-tracker-cancel-btn"
                                         onClick={handleCancelBooking}
                                         title="Cancel booking"
+                                        disabled={cancelling}
                                     >
                                         <X size={14} />
-                                        <span>Cancel</span>
+                                        <span>{cancelling ? 'Cancelling...' : 'Cancel'}</span>
                                     </button>
                                 )}
                             </div>
@@ -507,7 +528,8 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
                                 <div className="dash-activity-list">
                                     {history.slice(0, 5).map((item, idx) => {
                                         const isPending = item.status === 'pending';
-                                        const isFailed = item.status === 'failed' || (!isPending && !item.success && item.status !== 'success');
+                                        const isCancelled = item.status === 'cancelled';
+                                        const isFailed = !isCancelled && (item.status === 'failed' || (!isPending && !item.success && item.status !== 'success'));
 
                                         // Derive message and dot color from real counts
                                         let activityMsg = '';
@@ -516,6 +538,9 @@ function Dashboard({ onNavigate, onBookNow, showToast, bookingProgress, bookingR
                                         if (isPending) {
                                             activityMsg = 'Booking in progress...';
                                             dotClass = 'dot-amber';
+                                        } else if (isCancelled) {
+                                            activityMsg = 'Booking cancelled by user';
+                                            dotClass = 'dot-cancelled';
                                         } else if (isFailed) {
                                             activityMsg = `Failed to book — ${item.message || 'unknown error'}`;
                                             dotClass = 'dot-red';

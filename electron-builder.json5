@@ -2,7 +2,7 @@
   "appId": "com.mealsync.app",
   "productName": "MealSync",
   "copyright": "Copyright © 2025 yousef-ehabb",
-  "description": "Automated meal booking for Al-Zahraa University dorm students",
+  "afterSign": null,
   "directories": {
     "output": "dist-setup",
     "buildResources": "build"
@@ -19,16 +19,9 @@
       "filter": ["**/*"]
     }
   ],
-  "nsis": {
-    "installerHeaderIcon": "electron/assets/appMainIcon.ico",
-    "oneClick": false,
-    "perMachine": false,
-    "allowToChangeInstallationDirectory": true,
-    "createDesktopShortcut": true,
-    "createStartMenuShortcut": true,
-    "shortcutName": "MealSync"
-  },
   "win": {
+    "artifactName": "MealSync-Setup-${version}.${ext}",
+    "cscLink": "",
     "target": [
       {
         "target": "nsis",
@@ -36,5 +29,16 @@
       }
     ],
     "icon": "electron/assets/appMainIcon.ico"
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": false,
+    "allowElevation": true,
+    "allowToChangeInstallationDirectory": true,
+    "selectPerMachineByDefault": false,
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "deleteAppDataOnUninstall": false,
+    "runAfterFinish": true
   }
 }

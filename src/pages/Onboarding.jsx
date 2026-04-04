@@ -87,23 +87,42 @@ function Onboarding({ onComplete, showToast }) {
         setErrorMsg('');
         setIsValidating(true);
 
-        let result = await window.electronAPI.saveCredentials({ studentId, password });
+        let result;
+        try {
+            result = await window.electronAPI.saveCredentials({ studentId, password });
+        } catch (ipcError) {
+            setIsValidating(false);
+            setErrorMsg('Unexpected error — please try again');
+            triggerShake();
+            return;
+        }
 
         setIsValidating(false);
 
-        if (result.success) {
+        // STRICT check — only proceed on explicit true, never on truthy/undefined
+        if (result && result.success === true) {
             setIsSuccess(true);
             setTimeout(() => {
                 setIsSuccess(false);
                 setStep(3);
             }, 600);
         } else {
-            const errorStr = result.error || '';
-            const friendlyError = errorStr.includes('خطأ فى البيانات')
-                ? 'Invalid credentials — please check your Student ID and password'
-                : errorStr.toLowerCase().includes('timeout') || errorStr.toLowerCase().includes('too long')
-                    ? 'Could not reach portal — check your internet connection'
-                    : 'Login failed — please try again';
+            // Map error to user-friendly message using both type and error string
+            const errorType = result?.type || '';
+            const errorStr = result?.error || '';
+
+            let friendlyError;
+            if (errorType === 'invalid_credentials' || errorStr.includes('خطأ فى البيانات') || errorStr.includes('بيانات غير صحيحة') || errorStr.includes('Invalid')) {
+                friendlyError = 'Invalid credentials — please check your Student ID and password';
+            } else if (errorType === 'timeout' || errorStr.toLowerCase().includes('timeout') || errorStr.toLowerCase().includes('too long')) {
+                friendlyError = 'Could not reach portal — check your internet connection';
+            } else if (errorStr.includes('Browser component') || errorStr.includes('reinstall')) {
+                friendlyError = 'Browser component missing — please reinstall MealSync';
+            } else if (errorStr.includes('unexpected page')) {
+                friendlyError = 'Portal returned an unexpected page — please try again later';
+            } else {
+                friendlyError = 'Login failed — please try again';
+            }
 
             setErrorMsg(friendlyError);
             triggerShake();

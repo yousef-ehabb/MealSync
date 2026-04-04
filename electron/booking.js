@@ -1,5 +1,7 @@
 // Changes: P1-6 (domcontentloaded + delay 30), P1-7 (electron-log),
 // Fix A (batch checkbox reads), Fix B (dry-run), Fix C (webhook)
+// Bug 1: Cancellable delay & instant cancel feedback
+// Bug 2: Cleaner retry message, logic deduplication
 import { chromium } from 'playwright-core';
 import { getChromiumPath } from './chromiumPath.js';
 import fs from 'fs';
@@ -13,6 +15,11 @@ const RETRY_DELAY_MS = 30000;
 
 const activeBrowsers = new Set();
 let cancellationVersion = 0;
+let cancelRequested = false;
+
+export function requestCancellation() {
+    cancelRequested = true;
+}
 
 export async function abortActiveBrowsers() {
     cancellationVersion += 1;
@@ -43,9 +50,14 @@ export async function runBooking(studentId, password, options = {}) {
     const { headless = true, onProgress = () => { }, sessionPath = null, dryRun = false, webhookUrl = null } = options;
     let lastError = null;
     const startingCancellationVersion = cancellationVersion;
+    cancelRequested = false;
 
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
         try {
+            if (cancelRequested) {
+                cancelRequested = false;
+                throw new Error('CANCELLED');
+            }
             if (startingCancellationVersion !== cancellationVersion) {
                 const cancelError = new Error('BOOKING_CANCELLED');
                 cancelError.isExplicitRejection = true;
@@ -90,9 +102,9 @@ export async function runBooking(studentId, password, options = {}) {
                     step: 'retrying',
                     attempt,
                     maxAttempts: MAX_ATTEMPTS,
-                    message: `Network unstable, retrying in 30 seconds... (Attempt ${attempt}/${MAX_ATTEMPTS})`,
+                    message: `Connection unstable — retrying in 30s (attempt ${attempt} of ${MAX_ATTEMPTS})`,
                 });
-                await delay(RETRY_DELAY_MS);
+                await cancellableDelay(RETRY_DELAY_MS);
             }
         }
     }
@@ -102,10 +114,18 @@ export async function runBooking(studentId, password, options = {}) {
         await sendWebhook(webhookUrl, 'booking_failed', { message: lastError.message });
     }
 
+    if (lastError && lastError.message === 'CANCELLED') {
+        const err = new Error('Booking cancelled by user');
+        err.isCancelled = true;
+        throw err;
+    }
+
     throw lastError || new Error('Meal booking failed - Network timeout or system unreachable after 3 attempts');
 }
 
 export async function validateCredentials(studentId, password) {
+    log.info('[Login] Starting credential validation...', { studentId: studentId?.substring(0, 4) + '****' });
+
     let browser;
     try {
         browser = await chromium.launch({
@@ -143,6 +163,7 @@ export async function validateCredentials(studentId, password) {
         const page = await browser.newPage();
 
         await loginToPortal(page, studentId, password);
+        log.info('[Login] loginToPortal completed without throwing — login succeeded.');
 
         // Scrape student name from the sidebar profile
         let studentName = null;
@@ -151,21 +172,31 @@ export async function validateCredentials(studentId, password) {
             await nameEl.waitFor({ state: 'visible', timeout: 5000 });
             const rawName = await nameEl.textContent();
             studentName = rawName?.replace(/\s+/g, ' ').trim() || null;
+            log.info('[Login] Student name scraped:', studentName ? `"${studentName}"` : '(not found)');
         } catch (err) {
-            log.error(`[Booking] Failed to scrape name: ${err.message}`);
+            log.error(`[Login] Failed to scrape name: ${err.message}`);
             // Name scraping is best-effort, don't fail validation
         }
+
+        log.info('[Login] validateCredentials result:', { success: true, hasName: !!studentName });
         return { success: true, studentName };
     } catch (error) {
-        log.error('[Booking] Validation error:', error.message);
+        log.error('[Login] Validation failed:', error.message);
 
-        // On timeout, re-check if the error message appeared (credentials might be wrong
-        // but the portal was slow to render the error)
-        if (error.message.includes('Timeout') || error.message.includes('timeout')) {
-            return { success: false, error: 'System taking too long to respond', type: 'timeout' };
+        // Propagate the actual error message for accurate UI feedback.
+        // Check if this was an explicit credential rejection from loginToPortal.
+        if (error.isExplicitRejection) {
+            log.warn('[Login] Returning explicit rejection to caller.');
+            return { success: false, error: error.message, type: 'invalid_credentials' };
         }
 
-        return { success: false, error: 'Network error or system unreachable', type: 'network' };
+        // On timeout, return timeout type
+        if (error.message.includes('Timeout') || error.message.includes('timeout') || error.message.includes('LOGIN_TIMEOUT')) {
+            return { success: false, error: 'System taking too long to respond — check your internet connection', type: 'timeout' };
+        }
+
+        // All other errors — network issues, unexpected pages, etc.
+        return { success: false, error: error.message || 'Network error or system unreachable', type: 'network' };
     } finally {
         activeBrowsers.delete(browser);
         await browser.close();
@@ -380,8 +411,20 @@ async function executeBooking(studentId, password, headless, onProgress, session
     }
 }
 
-function delay(ms) {
-    return new Promise((resolve) => setTimeout(resolve, ms));
+function cancellableDelay(ms) {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(resolve, ms);
+        // Poll for cancellation every 200ms
+        const poll = setInterval(() => {
+            if (cancelRequested) {
+                clearTimeout(timer);
+                clearInterval(poll);
+                reject(new Error('CANCELLED'));
+            }
+        }, 200);
+        // Clean up poll when delay resolves naturally
+        setTimeout(() => clearInterval(poll), ms + 100);
+    });
 }
 
 // Fix C: Webhook notification helper — never includes credentials, never affects booking result

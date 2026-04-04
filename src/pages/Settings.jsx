@@ -250,7 +250,7 @@ function Settings({ onNavigate, onLogout, onReset, showToast, studentName, isOnl
 
                 <div style={{ textAlign: 'center', marginTop: '32px', paddingBottom: '16px' }}>
                     <p style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '2px' }}>
-                        MealSync v1.0.0 · Built by Yousef Ehab
+                        MealSync v1.1.0 · Built by Yousef Ehab
                     </p>
                     <p style={{ fontSize: '12px', color: '#9ca3af', marginBottom: '8px' }}>
                         Please remember my mother in your prayers.

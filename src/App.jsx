@@ -65,11 +65,24 @@ function App() {
         });
 
         window.electronAPI.onBookingError((data) => {
-            setBookingProgress(null);
-            const errResult = { success: false, message: data.message };
-            setBookingResult(errResult);
-            localStorage.setItem('lastBookingResult', JSON.stringify(errResult));
-            showToast(data.message || 'Booking failed', 'error');
+            const isCancelled = data.isCancelled ||
+                data.message?.toLowerCase().includes('cancel');
+
+            if (isCancelled) {
+                // For cancellations: show cancelled state briefly, then auto-dismiss
+                setBookingProgress({ step: 'cancelled', message: 'Booking cancelled by user' });
+                setTimeout(() => {
+                    setBookingProgress(null);
+                    setBookingResult(null);
+                }, 2000);
+            } else {
+                // For real errors: clear immediately and show error
+                setBookingProgress(null);
+                const errResult = { success: false, message: data.message };
+                setBookingResult(errResult);
+                localStorage.setItem('lastBookingResult', JSON.stringify(errResult));
+                showToast(data.message || 'Booking failed', 'error');
+            }
         });
 
         window.electronAPI.onTriggerBookNow(() => {

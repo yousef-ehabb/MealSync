@@ -23,9 +23,8 @@ export function getChromiumPath() {
 }
 
 function getChromiumExecutable() {
-  // Windows path inside the bundled chromium folder
   return path.join(
-    'chrome-win',
+    'chrome-win64',
     'chrome.exe'
   );
 }
